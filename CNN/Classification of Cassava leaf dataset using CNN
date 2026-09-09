@@ -1,0 +1,495 @@
+# ============================================================
+# 1. Importing the libraries
+# ============================================================
+# TensorFlow is used to build and train the CNN.
+# NumPy is used for numerical operations.
+# Matplotlib and Seaborn are used for visualizations.
+# Scikit-learn provides evaluation metrics like the
+# confusion matrix and classification report.
+
+import tensorflow as tf
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from tensorflow.keras import layers, models
+from sklearn.metrics import confusion_matrix, classification_report
+
+
+# ============================================================
+# 2. Setting the basic project parameters
+# ============================================================
+# The images are stored inside the "data" folder.
+# We resize all images to 128x128 so that they have
+# the same input size when passed to the CNN.
+# Batch size controls how many images are processed at once.
+# A fixed seed makes the train-validation split reproducible.
+
+DATASET_PATH = "./data"
+
+IMG_SIZE = (128, 128)
+BATCH_SIZE = 32
+SEED = 42
+
+
+# ============================================================
+# 3. Loading the dataset and creating the train/validation split
+# ============================================================
+# The images are loaded directly from folders.
+# 80% of the images are used for training and 20% for validation.
+# image_dataset_from_directory automatically assigns labels
+# based on the folder names.
+
+train_ds = tf.keras.utils.image_dataset_from_directory(
+    DATASET_PATH,
+    validation_split=0.2,
+    subset="training",
+    seed=SEED,
+    image_size=IMG_SIZE,
+    batch_size=BATCH_SIZE
+)
+
+val_ds = tf.keras.utils.image_dataset_from_directory(
+    DATASET_PATH,
+    validation_split=0.2,
+    subset="validation",
+    seed=SEED,
+    image_size=IMG_SIZE,
+    batch_size=BATCH_SIZE
+)
+
+# Store the names of the disease classes for later use
+# when displaying predictions and evaluation results.
+class_names = train_ds.class_names
+
+print("Classes:")
+for i, name in enumerate(class_names):
+    print(i, ":", name)
+
+
+# ============================================================
+# 4. Displaying a few training images
+# ============================================================
+# Before training the model, it is useful to look at some
+# sample images and check whether the dataset has been loaded
+# correctly and the labels match the images.
+
+plt.figure(figsize=(12, 8))
+
+for images, labels in train_ds.take(1):
+    for i in range(12):
+        ax = plt.subplot(3, 4, i + 1)
+
+        plt.imshow(images[i].numpy().astype("uint8"))
+        plt.title(class_names[labels[i]])
+        plt.axis("off")
+
+plt.tight_layout()
+plt.show()
+
+
+# ============================================================
+# 5. Applying data augmentation
+# ============================================================
+# Data augmentation creates slightly modified versions of
+# training images. This gives the CNN more variety to learn from
+# and can help reduce overfitting.
+#
+# Here we randomly flip, rotate and zoom the images.
+
+data_augmentation = tf.keras.Sequential([
+    layers.RandomFlip("horizontal"),
+    layers.RandomRotation(0.1),
+    layers.RandomZoom(0.1)
+])
+
+
+# ============================================================
+# 6. Optimizing the dataset pipeline
+# ============================================================
+# AUTOTUNE allows TensorFlow to automatically decide how much
+# data should be prepared in advance.
+#
+# Caching keeps the dataset available in memory after the first
+# pass, while prefetching prepares the next batch while the
+# model is working on the current one.
+
+AUTOTUNE = tf.data.AUTOTUNE
+
+train_ds = train_ds.cache().shuffle(1000).prefetch(
+    buffer_size=AUTOTUNE
+)
+
+val_ds = val_ds.cache().prefetch(
+    buffer_size=AUTOTUNE
+)
+
+
+# ============================================================
+# 7. Building the CNN model
+# ============================================================
+# The number of output neurons depends on the number of
+# disease classes present in the dataset.
+#
+# The CNN gradually increases the number of filters:
+# 32 -> 64 -> 128 -> 256
+#
+# This allows the network to learn increasingly complex
+# visual features from the leaf images.
+
+num_classes = len(class_names)
+
+model = models.Sequential([
+
+    # Define the input shape for RGB images
+    layers.Input(shape=(128, 128, 3)),
+
+    # Apply random transformations to training images
+    data_augmentation,
+
+    # Convert pixel values from 0-255 to 0-1
+    layers.Rescaling(1./255),
+
+    # --------------------------------------------------------
+    # Convolution Block 1
+    # --------------------------------------------------------
+    # The first convolution layer learns basic features
+    # such as edges, lines and simple textures.
+    layers.Conv2D(
+        32,
+        (3, 3),
+        activation="relu"
+    ),
+
+    # Reduce the spatial dimensions of the feature maps
+    layers.MaxPooling2D((2, 2)),
+
+
+    # --------------------------------------------------------
+    # Convolution Block 2
+    # --------------------------------------------------------
+    # More filters allow the model to learn more detailed
+    # patterns from the images.
+    layers.Conv2D(
+        64,
+        (3, 3),
+        activation="relu"
+    ),
+
+    layers.MaxPooling2D((2, 2)),
+
+
+    # --------------------------------------------------------
+    # Convolution Block 3
+    # --------------------------------------------------------
+    # At this stage the network can learn more complex
+    # shapes and textures.
+    layers.Conv2D(
+        128,
+        (3, 3),
+        activation="relu"
+    ),
+
+    layers.MaxPooling2D((2, 2)),
+
+
+    # --------------------------------------------------------
+    # Convolution Block 4
+    # --------------------------------------------------------
+    # The deeper layer extracts high-level features that
+    # are useful for distinguishing between diseases.
+    layers.Conv2D(
+        256,
+        (3, 3),
+        activation="relu"
+    ),
+
+    layers.MaxPooling2D((2, 2)),
+
+
+    # --------------------------------------------------------
+    # Classification section
+    # --------------------------------------------------------
+    # Flatten converts the 2D feature maps into a single
+    # vector so they can be passed to the fully connected layers.
+    layers.Flatten(),
+
+    # This dense layer combines the extracted features
+    # before making the final classification.
+    layers.Dense(
+        128,
+        activation="relu"
+    ),
+
+    # Dropout randomly disables 50% of neurons during training
+    # to help prevent overfitting.
+    layers.Dropout(0.5),
+
+    # The final layer predicts the probability of each
+    # disease class. Softmax makes the outputs sum to 1.
+    layers.Dense(
+        num_classes,
+        activation="softmax"
+    )
+])
+
+
+# ============================================================
+# 8. Checking the model architecture
+# ============================================================
+# model.summary() displays the layers, output shapes and
+# number of trainable parameters in the CNN.
+
+model.summary()
+
+
+# ============================================================
+# 9. Compiling the CNN
+# ============================================================
+# Adam is used as the optimizer because it adapts the learning
+# rate during training.
+#
+# Sparse categorical crossentropy is suitable because the
+# class labels are represented as integer values.
+#
+# Accuracy is tracked to measure how many images are classified
+# correctly.
+
+model.compile(
+    optimizer="adam",
+    loss="sparse_categorical_crossentropy",
+    metrics=["accuracy"]
+)
+
+
+# ============================================================
+# 10. Training the CNN
+# ============================================================
+# The model is trained for 20 epochs.
+# During training, the model learns from the training images
+# and its performance is checked on the validation dataset.
+
+EPOCHS = 20
+
+history = model.fit(
+    train_ds,
+    validation_data=val_ds,
+    epochs=EPOCHS
+)
+
+
+# ============================================================
+# 11. Plotting training and validation accuracy
+# ============================================================
+# These curves help us understand how the model's accuracy
+# changes as training progresses.
+#
+# Comparing training and validation accuracy can also give
+# an indication of overfitting.
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    history.history["accuracy"],
+    label="Training Accuracy"
+)
+
+plt.plot(
+    history.history["val_accuracy"],
+    label="Validation Accuracy"
+)
+
+plt.xlabel("Epoch")
+plt.ylabel("Accuracy")
+plt.title("Training and Validation Accuracy")
+
+plt.legend()
+plt.grid(True)
+
+plt.show()
+
+
+# ============================================================
+# 12. Plotting training and validation loss
+# ============================================================
+# Loss represents how far the model's predictions are from
+# the correct labels.
+#
+# Ideally, training and validation loss should decrease as
+# the model learns.
+
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    history.history["loss"],
+    label="Training Loss"
+)
+
+plt.plot(
+    history.history["val_loss"],
+    label="Validation Loss"
+)
+
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.title("Training and Validation Loss")
+
+plt.legend()
+plt.grid(True)
+
+plt.show()
+
+
+# ============================================================
+# 13. Evaluating the model on the validation dataset
+# ============================================================
+# After training, we evaluate the complete validation dataset
+# to get the final loss and accuracy.
+
+loss, accuracy = model.evaluate(val_ds)
+
+print("Validation Loss:", loss)
+print("Validation Accuracy:", accuracy)
+print("Validation Accuracy (%):", accuracy * 100)
+
+
+# ============================================================
+# 14. Generating predictions for the validation images
+# ============================================================
+# We store the actual labels and the model's predicted labels.
+# These values will later be used to create the confusion matrix
+# and classification report.
+
+y_true = []
+y_pred = []
+
+for images, labels in val_ds:
+
+    # Get prediction probabilities from the model
+    predictions = model.predict(
+        images,
+        verbose=0
+    )
+
+    # Select the class with the highest probability
+    predicted_classes = np.argmax(
+        predictions,
+        axis=1
+    )
+
+    # Store the actual and predicted labels
+    y_true.extend(labels.numpy())
+    y_pred.extend(predicted_classes)
+
+# Convert the lists into NumPy arrays for evaluation
+y_true = np.array(y_true)
+y_pred = np.array(y_pred)
+
+
+# ============================================================
+# 15. Creating the confusion matrix
+# ============================================================
+# The confusion matrix shows how many images from each actual
+# class were predicted as each class.
+#
+# It helps us understand which disease classes the CNN
+# confuses with one another.
+
+cm = confusion_matrix(
+    y_true,
+    y_pred
+)
+
+
+# ============================================================
+# 16. Generating the classification report
+# ============================================================
+# The classification report provides precision, recall,
+# F1-score and support for every disease class.
+
+report = classification_report(
+    y_true,
+    y_pred,
+    target_names=class_names
+)
+
+print(report)
+
+
+# ============================================================
+# 17. Loading a new leaf image for prediction
+# ============================================================
+# Now we test the trained CNN on a separate image.
+# The image is resized to the same 128x128 dimensions used
+# during training.
+
+from tensorflow.keras.utils import load_img, img_to_array
+
+image_path = "test_leaf.jpeg"
+
+img = load_img(
+    image_path,
+    target_size=IMG_SIZE
+)
+
+# Convert the image into a NumPy array
+img_array = img_to_array(img)
+
+# Add a batch dimension because the model expects
+# input in the form (batch, height, width, channels)
+img_array = tf.expand_dims(
+    img_array,
+    axis=0
+)
+
+
+# ============================================================
+# 18. Predicting the disease of the new image
+# ============================================================
+# The model returns a probability for each disease class.
+# We select the class with the highest probability.
+
+prediction = model.predict(img_array)
+
+predicted_index = np.argmax(prediction)
+
+predicted_class = class_names[predicted_index]
+
+# Convert the highest probability into a percentage
+confidence = prediction[0][predicted_index] * 100
+
+print("Predicted Disease:", predicted_class)
+print("Confidence:", round(confidence, 2), "%")
+
+
+# ============================================================
+# 19. Displaying the prediction
+# ============================================================
+# Finally, we display the test image along with the predicted
+# disease and the model's confidence.
+
+plt.figure(figsize=(6, 6))
+
+plt.imshow(img)
+
+plt.title(
+    f"Prediction: {predicted_class}\n"
+    f"Confidence: {confidence:.2f}%"
+)
+
+plt.axis("off")
+
+plt.show()
+
+
+# ============================================================
+# 20. Saving the trained model
+# ============================================================
+# Save the trained CNN so that it can be loaded later without
+# having to train the model again.
+
+model.save(
+    "cassava_leaf_disease_cnn.keras"
+)
+
+print("Model saved successfully!")
