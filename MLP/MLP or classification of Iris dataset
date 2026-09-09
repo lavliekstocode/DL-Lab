@@ -1,1 +1,140 @@
+# Step 1: Import the libraries we need for loading the Iris dataset,
+# splitting and scaling the data, training the MLP model, and evaluating it.
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.neural_network import MLPClassifier
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 
+
+# Step 2: Load the built-in Iris dataset.
+# X contains the flower measurements, while y contains the corresponding species labels.
+iris = load_iris()
+X, y = iris.data, iris.target
+
+
+# Step 3: Split the dataset into training and testing sets.
+# 80% of the data is used to train the model and 20% is kept aside for testing.
+# random_state ensures that we get the same split every time we run the notebook.
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42
+)
+
+
+# Step 4: Standardize the input features.
+# Scaling is important for neural networks because it puts all features
+# on a comparable scale and helps the model train more effectively.
+scaler = StandardScaler()
+
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+
+# Step 5: Create the Multilayer Perceptron (MLP) classifier.
+# The network has two hidden layers with 10 neurons each.
+# ReLU is used as the activation function and Adam is used for optimization.
+mlp = MLPClassifier(
+    hidden_layer_sizes=(10, 10),
+    activation='relu',
+    solver='adam',
+    max_iter=1000,
+    random_state=42
+)
+
+
+# Step 6: Train the neural network using the scaled training data.
+mlp.fit(X_train, y_train)
+
+
+# Step 7: Use the trained model to predict the species of the test samples.
+y_pred = mlp.predict(X_test)
+
+
+# Step 8: Evaluate the model using accuracy, confusion matrix,
+# and a detailed classification report.
+print("Accuracy:", accuracy_score(y_test, y_pred))
+
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+
+print(
+    "\nClassification Report:\n",
+    classification_report(y_test, y_pred)
+)
+
+
+# Step 9: Visualize the confusion matrix.
+# This makes it easier to see how many samples from each Iris class
+# were classified correctly or incorrectly.
+import matplotlib.pyplot as plt
+from sklearn.metrics import ConfusionMatrixDisplay
+
+ConfusionMatrixDisplay.from_estimator(
+    mlp,
+    X_test,
+    y_test,
+    display_labels=iris.target_names,
+    cmap='Blues'
+)
+
+plt.title("Confusion Matrix")
+plt.show()
+
+
+# Step 10: Visualize the actual classes in the test dataset.
+# The first two features (sepal length and sepal width) are plotted
+# to give us a visual representation of the different Iris classes.
+plt.figure(figsize=(6, 4))
+
+plt.scatter(
+    X_test[:, 0],
+    X_test[:, 1],
+    c=y_test,
+    cmap='viridis'
+)
+
+plt.xlabel("Sepal Length")
+plt.ylabel("Sepal Width")
+plt.title("Actual Iris Classes")
+plt.colorbar(label="Class")
+plt.show()
+
+
+# Step 11: Visualize the classes predicted by the MLP model.
+# Comparing this plot with the previous one helps us understand
+# how closely the model's predictions match the actual labels.
+plt.figure(figsize=(6, 4))
+
+plt.scatter(
+    X_test[:, 0],
+    X_test[:, 1],
+    c=y_pred,
+    cmap='viridis'
+)
+
+plt.xlabel("Sepal Length")
+plt.ylabel("Sepal Width")
+plt.title("Predicted Iris Classes")
+plt.colorbar(label="Predicted Class")
+plt.show()
+
+
+# Step 12: Visualize the relationship between petal length and petal width.
+# These two features provide a useful visual representation of
+# how the different Iris species are distributed.
+plt.figure(figsize=(6, 4))
+
+plt.scatter(
+    X[:, 2],
+    X[:, 3],
+    c=y,
+    cmap='viridis'
+)
+
+plt.xlabel("Petal Length")
+plt.ylabel("Petal Width")
+plt.title("Petal Length vs Petal Width")
+plt.colorbar(label="Species")
+plt.show()
