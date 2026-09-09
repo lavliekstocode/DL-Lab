@@ -1,0 +1,448 @@
+# Step 1: Import the libraries required for building, training,
+# evaluating, and visualizing the neural network.
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense
+from tensorflow.keras.optimizers import Adam
+import matplotlib.pyplot as plt
+import pandas as pd
+
+
+# Step 2: Load the CIFAR-10 dataset.
+# It contains 60,000 color images belonging to 10 different classes.
+# The dataset is already divided into training and testing sets.
+(x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+
+
+# Step 3: Flatten the class labels so that they become simple 1D arrays.
+y_train = y_train.flatten()
+y_test = y_test.flatten()
+
+
+# Step 4: Convert each 32x32 RGB image into a 3072-element vector.
+# Pixel values are divided by 255 so that they are normalized to the range [0, 1].
+x_train = x_train.reshape(-1, 3072) / 255.0
+x_test = x_test.reshape(-1, 3072) / 255.0
+
+
+# Step 5: Create a function that builds our fully connected neural network.
+# The learning rate is passed as an argument so we can experiment with
+# different learning rates later.
+def create_model(lr):
+
+    m = Sequential([
+        # First hidden layer with 256 neurons and ReLU activation.
+        # The input contains 3072 features because each image was flattened.
+        Dense(256, activation='relu', input_shape=(3072,)),
+
+        # Second hidden layer with 128 neurons.
+        Dense(128, activation='relu'),
+
+        # Output layer with 10 neurons, one for each CIFAR-10 class.
+        # Softmax converts the outputs into class probabilities.
+        Dense(10, activation='softmax')
+    ])
+
+    # Configure the model using Adam optimization and
+    # sparse categorical cross-entropy for multi-class classification.
+    m.compile(
+        optimizer=Adam(learning_rate=lr),
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+
+    return m
+
+
+# Step 6: Experiment with different learning rates.
+# This helps us understand how the learning rate affects model performance.
+learning_rates = [0.1, 0.01, 0.001, 0.0001]
+results = []
+
+
+# Train a separate model for each learning rate and record its test accuracy.
+for lr in learning_rates:
+
+    model = create_model(lr)
+
+    model.fit(
+        x_train,
+        y_train,
+        epochs=5,
+        batch_size=128,
+        verbose=0
+    )
+
+    loss, acc = model.evaluate(
+        x_test,
+        y_test,
+        verbose=0
+    )
+
+    results.append([lr, acc])
+
+
+# Step 7: Store the learning-rate experiment results in a DataFrame
+# so that they can be displayed and plotted easily.
+df = pd.DataFrame(
+    results,
+    columns=['Learning Rate', 'Accuracy']
+)
+
+print(df)
+
+
+# Step 8: Visualize how the learning rate affects classification accuracy.
+# A logarithmic x-axis makes it easier to compare the different learning rates.
+plt.plot(
+    df['Learning Rate'],
+    df['Accuracy'],
+    marker='o'
+)
+
+plt.xscale('log')
+plt.grid()
+plt.show()
+
+
+# Step 9: Experiment with different numbers of training epochs.
+# This shows how training for longer affects the model's performance.
+epochs_list = [5, 10, 20]
+res = []
+
+
+# Train a new model for each epoch configuration.
+# A learning rate of 0.001 is used for these experiments.
+for ep in epochs_list:
+
+    model = create_model(0.001)
+
+    h = model.fit(
+        x_train,
+        y_train,
+        validation_split=0.2,
+        epochs=ep,
+        batch_size=128,
+        verbose=0
+    )
+
+    loss, acc = model.evaluate(
+        x_test,
+        y_test,
+        verbose=0
+    )
+
+    res.append([ep, acc])
+
+
+# Step 10: Store the epoch experiment results and display them.
+edf = pd.DataFrame(
+    res,
+    columns=['Epochs', 'Accuracy']
+)
+
+print(edf)
+
+
+# Step 11: Plot the relationship between the number of epochs
+# and the resulting test accuracy.
+plt.plot(
+    edf['Epochs'],
+    edf['Accuracy'],
+    marker='o'
+)
+
+plt.grid()
+plt.show()
+
+
+# Step 12: Create the final model using the selected learning rate.
+# The model will now be trained for 20 epochs with validation data.
+model = create_model(0.001)
+
+
+# Step 13: Train the final model.
+# 20% of the training data is used for validation so we can
+# monitor how well the model generalizes during training.
+history = model.fit(
+    x_train,
+    y_train,
+    validation_split=0.2,
+    epochs=20,
+    batch_size=128
+)
+
+
+# Step 14: Plot training and validation accuracy.
+# If training accuracy keeps increasing while validation accuracy
+# stops improving, it can indicate overfitting.
+plt.plot(history.history['accuracy'])
+plt.plot(history.history['val_accuracy'])
+
+plt.legend(['Train', 'Val'])
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+
+plt.show()
+
+
+# Step 15: Plot training and validation loss.
+# This helps us understand how the model's error changes
+# throughout the training process.
+plt.plot(history.history['loss'])
+plt.plot(history.history['val_loss'])
+
+plt.legend(['Train', 'Val'])
+plt.xlabel('Epoch')
+plt.ylabel('Loss')
+
+plt.show()
+
+
+# Step 16: Evaluate the final trained model on the unseen test dataset.
+# This gives us the final loss and classification accuracy.
+print(model.evaluate(x_test, y_test))
+
+
+# Step 17: Define the names of the ten CIFAR-10 classes.
+import numpy as np
+
+class_names = [
+    'Airplane',
+    'Automobile',
+    'Bird',
+    'Cat',
+    'Deer',
+    'Dog',
+    'Frog',
+    'Horse',
+    'Ship',
+    'Truck'
+]
+
+
+# Step 18: Generate predictions for all test images.
+# The model returns probabilities for all 10 classes.
+predictions = model.predict(x_test)
+
+
+# Step 19: Select the class with the highest predicted probability.
+y_pred = np.argmax(predictions, axis=1)
+
+y_test_flat = y_test.flatten()
+
+
+# Step 20: Convert the flattened test images back into their
+# original 32x32 RGB format so they can be displayed.
+images = x_test.reshape(-1, 32, 32, 3)
+
+
+# Step 21: Find the test images that the model classified incorrectly.
+wrong = np.where(y_pred != y_test)[0]
+
+
+# Step 22: Display a sample of incorrect predictions.
+# This allows us to visually inspect where the neural network struggles.
+plt.figure(figsize=(12, 8))
+
+for i, idx in enumerate(wrong[:12]):
+
+    plt.subplot(3, 4, i + 1)
+
+    plt.imshow(images[idx])
+
+    plt.title(
+        f"True: {class_names[y_test[idx]]}\n"
+        f"Pred: {class_names[y_pred[idx]]}"
+    )
+
+    plt.axis('off')
+
+plt.tight_layout()
+plt.show()
+
+
+# Step 23: Calculate the generalization gap.
+# This is the difference between training accuracy and validation accuracy.
+# A large gap can be an indication that the model is overfitting.
+train_acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+
+gap = np.array(train_acc) - np.array(val_acc)
+
+
+# Step 24: Plot the generalization gap across the training epochs.
+plt.figure(figsize=(8, 5))
+
+plt.plot(
+    range(1, 21),
+    gap,
+    marker='o'
+)
+
+plt.axhline(
+    y=0,
+    linestyle='--'
+)
+
+plt.xlabel("Epoch")
+plt.ylabel("Generalization Gap")
+plt.title("Generalization Gap Across Training")
+
+plt.grid()
+plt.show()
+
+
+# Step 25: Calculate classification accuracy separately for each class.
+# This helps identify which CIFAR-10 categories the model handles well
+# and which ones are more difficult to classify.
+class_accuracy = []
+
+for i in range(10):
+
+    indices = y_test == i
+
+    acc = np.mean(
+        y_pred[indices] == y_test[indices]
+    )
+
+    class_accuracy.append(acc)
+
+
+# Step 26: Visualize the accuracy achieved for each individual class.
+plt.figure(figsize=(10, 5))
+
+plt.bar(
+    class_names,
+    class_accuracy
+)
+
+plt.xlabel("Class")
+plt.ylabel("Accuracy")
+plt.title("Per-Class Classification Accuracy")
+plt.xticks(rotation=45)
+plt.grid(axis='y')
+
+plt.show()
+
+
+# Step 27: Calculate the model's confidence for every prediction.
+# The highest probability among the ten classes is treated as
+# the model's confidence for that prediction.
+predictions = model.predict(x_test)
+
+confidence = np.max(
+    predictions,
+    axis=1
+)
+
+correct = y_pred == y_test
+
+
+# Step 28: Compare the confidence distributions of correct
+# and incorrect predictions.
+# This helps us understand whether the model is confidently
+# making mistakes or becoming uncertain when it predicts incorrectly.
+plt.figure(figsize=(8, 5))
+
+plt.hist(
+    confidence[correct],
+    bins=20,
+    alpha=0.6,
+    label='Correct'
+)
+
+plt.hist(
+    confidence[~correct],
+    bins=20,
+    alpha=0.6,
+    label='Incorrect'
+)
+
+plt.xlabel("Prediction Confidence")
+plt.ylabel("Number of Samples")
+plt.title("Confidence Distribution: Correct vs Incorrect Predictions")
+
+plt.legend()
+plt.grid()
+
+plt.show()
+
+
+# Step 29: Generate a confusion matrix to see how predictions
+# are distributed across the ten CIFAR-10 classes.
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import numpy as np
+
+y_pred = np.argmax(
+    model.predict(x_test),
+    axis=1
+)
+
+cm = confusion_matrix(
+    y_test,
+    y_pred
+)
+
+
+# Step 30: Display the confusion matrix with readable class labels.
+disp = ConfusionMatrixDisplay(
+    confusion_matrix=cm,
+    display_labels=[
+        'Airplane',
+        'Auto',
+        'Bird',
+        'Cat',
+        'Deer',
+        'Dog',
+        'Frog',
+        'Horse',
+        'Ship',
+        'Truck'
+    ]
+)
+
+fig, ax = plt.subplots(figsize=(10, 8))
+
+disp.plot(
+    ax=ax,
+    cmap='Blues',
+    xticks_rotation=45
+)
+
+plt.title("Confusion Matrix - CIFAR-10")
+plt.show()
+
+
+# Step 31: Find the incorrectly classified images with the
+# highest prediction confidence.
+# These are particularly interesting because the model was
+# confident even though its prediction was wrong.
+wrong_confidence = confidence[wrong]
+
+top_wrong = wrong[
+    np.argsort(wrong_confidence)[-12:]
+]
+
+
+# Step 32: Display the most confidently misclassified images.
+# Each image shows the actual class, predicted class,
+# and the model's confidence.
+plt.figure(figsize=(12, 8))
+
+for i, idx in enumerate(top_wrong):
+
+    plt.subplot(3, 4, i + 1)
+
+    plt.imshow(images[idx])
+
+    plt.title(
+        f"True: {class_names[y_test[idx]]}\n"
+        f"Pred: {class_names[y_pred[idx]]}\n"
+        f"Conf: {confidence[idx] * 100:.1f}%"
+    )
+
+    plt.axis('off')
+
+plt.tight_layout()
+plt.show()
