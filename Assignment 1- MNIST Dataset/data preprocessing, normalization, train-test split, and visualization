@@ -1,46 +1,123 @@
+# Import TensorFlow for loading the MNIST dataset and building the neural network
 import tensorflow as tf
+
+# Import Matplotlib for displaying images and plotting training results
 import matplotlib.pyplot as plt
 
+
+# Load the MNIST handwritten digit dataset
+# It is already divided into training and testing data
 (train_images, train_labels), (test_images, test_labels) = tf.keras.datasets.mnist.load_data()
 
-train_images = train_images /255.0
+
+# Normalize the pixel values from the range 0-255 to 0-1
+# This makes the input data easier for the neural network to process
+train_images = train_images / 255.0
 test_images = test_images / 255.0
 
+
+# Check the shape of the training and testing image datasets
 print(train_images.shape)
 print(test_images.shape)
+
+# Display the training labels to see which digit belongs to each image
 print(train_labels)
 
+
+# Display one sample image from the training dataset
+# cmap='gray' displays the image in grayscale
 plt.imshow(train_images[1], cmap='gray')
 plt.show()
+
+
+# Create a Sequential neural network
+# Layers are added one after another in sequence
 my_model = tf.keras.models.Sequential()
+
+
+# Flatten the 28x28 image into a single vector of 784 values
+# This allows the image to be passed into a fully connected Dense layer
 my_model.add(tf.keras.layers.Flatten(input_shape=(28, 28)))
-my_model.add(tf.keras.layers.Dense(128, activation='relu'))     
-my_model.add(tf.keras.layers.Dense(10, activation='softmax'))   
 
-my_model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy']) 
 
-my_model.fit(train_images, train_labels, epochs=3)
+# Add a hidden layer with 128 neurons
+# ReLU helps the network learn non-linear patterns from the images
+my_model.add(tf.keras.layers.Dense(128, activation='relu'))
+
+
+# Add the output layer with 10 neurons, one for each digit (0-9)
+# Softmax converts the outputs into probabilities for each digit
+my_model.add(tf.keras.layers.Dense(10, activation='softmax'))
+
+
+# Configure the model before training
+# Adam is used to optimize the model weights
+# Sparse categorical crossentropy is suitable for integer digit labels
+# Accuracy is used to measure how many predictions are correct
+my_model.compile(
+    optimizer='adam',
+    loss='sparse_categorical_crossentropy',
+    metrics=['accuracy']
+)
+
+
+# Train the neural network using the training images and labels
+# The model goes through the complete training dataset 3 times
+history = my_model.fit(
+    train_images,
+    train_labels,
+    epochs=3
+)
+
+
+# Evaluate the trained model using the test dataset
+# This gives us the loss and accuracy on images the model has not trained on
 val_loss, val_acc = my_model.evaluate(test_images, test_labels)
+
 print('Test accuracy: ', val_acc)
 
-plt.figure(figsize=(8,8))
+
+# Display the first 9 training images in a 3x3 grid
+# This gives a quick visual look at the handwritten digits in the dataset
+plt.figure(figsize=(8, 8))
+
 for i in range(9):
-    plt.subplot(3,3,i+1)
+    plt.subplot(3, 3, i + 1)
+
+    # Display the current image in grayscale
     plt.imshow(train_images[i], cmap='gray')
+
+    # Display the actual digit label as the title
     plt.title(train_labels[i])
+
+    # Hide the axis so the images are easier to view
     plt.axis('off')
+
 plt.show()
 
+
+# Plot the training accuracy recorded during each epoch
+# This shows how the model's accuracy changes as it learns
 plt.plot(history.history['accuracy'])
+
 plt.title("Training Accuracy")
 plt.xlabel("Epoch")
 plt.ylabel("Accuracy")
+
 plt.show()
 
+
+# Plot the training loss recorded during each epoch
+# A decreasing loss generally indicates that the model is learning
 plt.plot(history.history['loss'])
+
 plt.title("Training Loss")
 plt.xlabel("Epoch")
 plt.ylabel("Loss")
+
 plt.show()
 
+
+# Save the trained model so it can be loaded and used later
+# without having to train it again
 my_model.save('my_mnist_model.keras')
