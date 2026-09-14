@@ -1,0 +1,600 @@
+# ============================================================
+# 1. Import the libraries
+# ============================================================
+
+# TensorFlow/Keras is used to build and train the CNN models
+import tensorflow as tf
+from tensorflow.keras import layers, models
+
+# These are the pretrained CNN architectures we want to compare
+from tensorflow.keras.applications import VGG16, ResNet50, EfficientNetB0
+
+# Used for converting the CIFAR-10 labels into one-hot encoded values
+from tensorflow.keras.utils import to_categorical
+
+# NumPy is useful for working with arrays and predictions
+import numpy as np
+
+# Pandas will help us organize the model comparison results
+import pandas as pd
+
+# Matplotlib is used for plotting the results
+import matplotlib.pyplot as plt
+
+# Used to measure how long each model takes to train
+import time
+
+
+# ============================================================
+# 2. Load the CIFAR-10 dataset
+# ============================================================
+
+# CIFAR-10 contains 60,000 color images belonging to 10 classes.
+# TensorFlow automatically separates them into training and test sets.
+(x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+
+
+# ============================================================
+# 3. Select a smaller subset of the dataset
+# ============================================================
+
+# Training several large CNN architectures can take a long time.
+# So, for this experiment, we use a smaller subset of CIFAR-10.
+
+TRAIN_SIZE = 10000
+TEST_SIZE = 2000
+
+x_train = x_train[:TRAIN_SIZE]
+y_train = y_train[:TRAIN_SIZE]
+
+x_test = x_test[:TEST_SIZE]
+y_test = y_test[:TEST_SIZE]
+
+
+# ============================================================
+# 4. Prepare the class labels
+# ============================================================
+
+# CIFAR-10 labels initially have an extra dimension.
+# Flattening them gives us a simple 1D array of class numbers.
+y_train = y_train.flatten()
+y_test = y_test.flatten()
+
+
+# Convert the integer labels into one-hot encoded vectors.
+# This is useful because the models use categorical crossentropy.
+y_train = to_categorical(y_train, 10)
+y_test = to_categorical(y_test, 10)
+
+
+# ============================================================
+# 5. Resize the images
+# ============================================================
+
+# Original CIFAR-10 images are only 32x32 pixels.
+# We resize them to 96x96 so they can be used with the
+# pretrained CNN architectures more comfortably.
+
+IMG_SIZE = 96
+
+x_train = tf.image.resize(x_train, (IMG_SIZE, IMG_SIZE))
+x_test = tf.image.resize(x_test, (IMG_SIZE, IMG_SIZE))
+
+
+# Convert the images to floating-point values.
+x_train = tf.cast(x_train, tf.float32)
+x_test = tf.cast(x_test, tf.float32)
+
+
+# ============================================================
+# 6. Create the data augmentation pipeline
+# ============================================================
+
+# Data augmentation creates slightly different versions of
+# the training images. This can help the models generalize better.
+
+data_augmentation = tf.keras.Sequential([
+    layers.RandomFlip("horizontal"),
+    layers.RandomRotation(0.1),
+    layers.RandomZoom(0.1)
+])
+
+
+# ============================================================
+# 7. Create TensorFlow datasets
+# ============================================================
+
+# Convert the training arrays into a TensorFlow dataset.
+train_ds = tf.data.Dataset.from_tensor_slices(
+    (x_train, y_train)
+)
+
+# Shuffle the images so the model does not always see them
+# in exactly the same order.
+train_ds = train_ds.shuffle(1000)
+
+# Group the images into batches.
+BATCH_SIZE = 32
+
+train_ds = train_ds.batch(BATCH_SIZE)
+
+# Prefetch prepares the next batch while the model is working
+# on the current batch, which can make training more efficient.
+train_ds = train_ds.prefetch(tf.data.AUTOTUNE)
+
+
+# Create the test dataset.
+# We don't need to shuffle test data because it is only used for evaluation.
+test_ds = tf.data.Dataset.from_tensor_slices(
+    (x_test, y_test)
+)
+
+test_ds = test_ds.batch(BATCH_SIZE)
+test_ds = test_ds.prefetch(tf.data.AUTOTUNE)
+
+
+# ============================================================
+# 8. Build the AlexNet model
+# ============================================================
+
+def create_alexnet():
+
+    # AlexNet is built from scratch using standard CNN layers.
+    model = models.Sequential([
+        
+        # Apply the same augmentation used for the other models
+        data_augmentation,
+
+        # First convolution layer learns simple features such as edges
+        layers.Conv2D(
+            64,
+            kernel_size=3,
+            strides=1,
+            padding="same",
+            activation="relu",
+            input_shape=(IMG_SIZE, IMG_SIZE, 3)
+        ),
+
+        # Reduce the size of the feature maps
+        layers.MaxPooling2D((2, 2)),
+
+        # Deeper convolution layers can learn more detailed patterns
+        layers.Conv2D(
+            192,
+            kernel_size=3,
+            padding="same",
+            activation="relu"
+        ),
+
+        layers.MaxPooling2D((2, 2)),
+
+        layers.Conv2D(
+            384,
+            kernel_size=3,
+            padding="same",
+            activation="relu"
+        ),
+
+        layers.Conv2D(
+            256,
+            kernel_size=3,
+            padding="same",
+            activation="relu"
+        ),
+
+        layers.Conv2D(
+            256,
+            kernel_size=3,
+            padding="same",
+            activation="relu"
+        ),
+
+        layers.MaxPooling2D((2, 2)),
+
+        # Convert the feature maps into a single feature vector
+        layers.GlobalAveragePooling2D(),
+
+        # Fully connected layer for classification
+        layers.Dense(256, activation="relu"),
+
+        # Dropout helps reduce overfitting
+        layers.Dropout(0.5),
+
+        # Ten outputs correspond to the ten CIFAR-10 classes
+        layers.Dense(10, activation="softmax")
+    ])
+
+    return model
+
+
+# ============================================================
+# 9. Build the VGG16 model
+# ============================================================
+
+def create_vgg16():
+
+    # Load VGG16 with weights that were already learned from ImageNet.
+    # include_top=False removes the original ImageNet classifier.
+    base_model = VGG16(
+        weights="imagenet",
+        include_top=False,
+        input_shape=(IMG_SIZE, IMG_SIZE, 3)
+    )
+
+    # Freeze the pretrained layers so their weights are not changed
+    # while training on CIFAR-10.
+    base_model.trainable = False
+
+    model = models.Sequential([
+        
+        data_augmentation,
+
+        # Use VGG16 as a pretrained feature extractor
+        base_model,
+
+        # Convert the extracted feature maps into a feature vector
+        layers.GlobalAveragePooling2D(),
+
+        # Add a smaller classifier for the CIFAR-10 classes
+        layers.Dense(128, activation="relu"),
+
+        # Help prevent overfitting
+        layers.Dropout(0.5),
+
+        # Final prediction for the 10 CIFAR-10 classes
+        layers.Dense(10, activation="softmax")
+    ])
+
+    return model
+
+
+# ============================================================
+# 10. Build the ResNet50 model
+# ============================================================
+
+def create_resnet50():
+
+    # Load ResNet50 with pretrained ImageNet weights.
+    base_model = ResNet50(
+        weights="imagenet",
+        include_top=False,
+        input_shape=(IMG_SIZE, IMG_SIZE, 3)
+    )
+
+    # Keep the pretrained feature extractor frozen.
+    base_model.trainable = False
+
+    model = models.Sequential([
+        
+        data_augmentation,
+
+        # ResNet50 extracts useful visual features from the images
+        base_model,
+
+        # Reduce the feature maps to a compact representation
+        layers.GlobalAveragePooling2D(),
+
+        # New classifier for CIFAR-10
+        layers.Dense(128, activation="relu"),
+
+        layers.Dropout(0.5),
+
+        # Ten output classes
+        layers.Dense(10, activation="softmax")
+    ])
+
+    return model
+
+
+# ============================================================
+# 11. Build the EfficientNetB0 model
+# ============================================================
+
+def create_efficientnet():
+
+    # Load EfficientNetB0 with pretrained ImageNet weights.
+    base_model = EfficientNetB0(
+        weights="imagenet",
+        include_top=False,
+        input_shape=(IMG_SIZE, IMG_SIZE, 3)
+    )
+
+    # Freeze the pretrained layers during this experiment.
+    base_model.trainable = False
+
+    model = models.Sequential([
+        
+        data_augmentation,
+
+        # Use EfficientNet as the feature extractor
+        base_model,
+
+        # Convert the extracted feature maps into a vector
+        layers.GlobalAveragePooling2D(),
+
+        # Add a small classifier for CIFAR-10
+        layers.Dense(128, activation="relu"),
+
+        layers.Dropout(0.5),
+
+        # Final classification layer
+        layers.Dense(10, activation="softmax")
+    ])
+
+    return model
+
+
+# ============================================================
+# 12. Compile a model
+# ============================================================
+
+def compile_model(model):
+
+    # All four models use the same optimizer and learning rate
+    # so that the comparison is reasonably consistent.
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(
+            learning_rate=0.001
+        ),
+
+        # Labels are one-hot encoded, so categorical crossentropy
+        # is used as the loss function.
+        loss="categorical_crossentropy",
+
+        # Accuracy tells us how many images were classified correctly.
+        metrics=["accuracy"]
+    )
+
+    return model
+
+
+# ============================================================
+# 13. Train and evaluate a model
+# ============================================================
+
+def train_model(model, model_name):
+
+    print("\n" + "=" * 60)
+    print(f"Training {model_name}")
+    print("=" * 60)
+
+    # Start the timer so we can compare training time later.
+    start_time = time.time()
+
+    # Train the model for 5 epochs.
+    # The validation split is handled manually by creating
+    # a validation dataset from the training data.
+    history = model.fit(
+        train_ds,
+        validation_data=test_ds,
+        epochs=5
+    )
+
+    # Calculate how long training took.
+    training_time = time.time() - start_time
+
+    # Evaluate the model on the test dataset.
+    test_loss, test_accuracy = model.evaluate(
+        test_ds,
+        verbose=0
+    )
+
+    print(f"{model_name} Test Accuracy: {test_accuracy:.4f}")
+    print(f"{model_name} Test Loss: {test_loss:.4f}")
+    print(f"{model_name} Training Time: {training_time:.2f} seconds")
+
+    return history, test_loss, test_accuracy, training_time
+
+
+# ============================================================
+# 14. Create and compile all four models
+# ============================================================
+
+# Create the models one by one.
+alexnet = create_alexnet()
+vgg16 = create_vgg16()
+resnet50 = create_resnet50()
+efficientnet = create_efficientnet()
+
+
+# Compile each model using the same configuration.
+alexnet = compile_model(alexnet)
+vgg16 = compile_model(vgg16)
+resnet50 = compile_model(resnet50)
+efficientnet = compile_model(efficientnet)
+
+
+# ============================================================
+# 15. Train all models
+# ============================================================
+
+# Keep the training histories and final results so that
+# we can compare the architectures later.
+
+histories = {}
+results = []
+
+
+# Train AlexNet
+history, loss, accuracy, training_time = train_model(
+    alexnet,
+    "AlexNet"
+)
+
+histories["AlexNet"] = history
+
+results.append([
+    "AlexNet",
+    accuracy * 100,
+    loss,
+    training_time
+])
+
+
+# Train VGG16
+history, loss, accuracy, training_time = train_model(
+    vgg16,
+    "VGG16"
+)
+
+histories["VGG16"] = history
+
+results.append([
+    "VGG16",
+    accuracy * 100,
+    loss,
+    training_time
+])
+
+
+# Train ResNet50
+history, loss, accuracy, training_time = train_model(
+    resnet50,
+    "ResNet50"
+)
+
+histories["ResNet50"] = history
+
+results.append([
+    "ResNet50",
+    accuracy * 100,
+    loss,
+    training_time
+])
+
+
+# Train EfficientNetB0
+history, loss, accuracy, training_time = train_model(
+    efficientnet,
+    "EfficientNetB0"
+)
+
+histories["EfficientNetB0"] = history
+
+results.append([
+    "EfficientNetB0",
+    accuracy * 100,
+    loss,
+    training_time
+])
+
+
+# ============================================================
+# 16. Create a comparison table
+# ============================================================
+
+# Put all the model results into a Pandas DataFrame
+# so they are easier to read and compare.
+results = pd.DataFrame(
+    results,
+    columns=[
+        "Model",
+        "Test Accuracy (%)",
+        "Test Loss",
+        "Training Time (seconds)"
+    ]
+)
+
+print("\nModel Comparison:")
+print(results)
+
+
+# ============================================================
+# 17. Compare validation accuracy
+# ============================================================
+
+# Plot the validation accuracy of all four models
+# on the same graph.
+plt.figure(figsize=(10, 6))
+
+for model_name, history in histories.items():
+
+    plt.plot(
+        history.history["val_accuracy"],
+        label=model_name
+    )
+
+plt.xlabel("Epoch")
+plt.ylabel("Validation Accuracy")
+plt.title("Validation Accuracy Comparison")
+
+plt.legend()
+plt.grid()
+
+plt.show()
+
+
+# ============================================================
+# 18. Compare validation loss
+# ============================================================
+
+# Plot validation loss for each architecture.
+plt.figure(figsize=(10, 6))
+
+for model_name, history in histories.items():
+
+    plt.plot(
+        history.history["val_loss"],
+        label=model_name
+    )
+
+plt.xlabel("Epoch")
+plt.ylabel("Validation Loss")
+plt.title("Validation Loss Comparison")
+
+plt.legend()
+plt.grid()
+
+plt.show()
+
+
+# ============================================================
+# 19. Compare final test accuracy
+# ============================================================
+
+# A bar chart makes it easier to see which model achieved
+# the highest final test accuracy.
+plt.figure(figsize=(10, 6))
+
+plt.bar(
+    results["Model"],
+    results["Test Accuracy (%)"]
+)
+
+plt.xlabel("Model")
+plt.ylabel("Test Accuracy (%)")
+plt.title("Test Accuracy Comparison")
+
+plt.xticks(rotation=20)
+plt.grid(axis="y")
+
+plt.show()
+
+
+# ============================================================
+# 20. Find the best-performing model
+# ============================================================
+
+# Find the row containing the highest test accuracy.
+best_model = results.loc[
+    results["Test Accuracy (%)"].idxmax()
+]
+
+print("\n" + "=" * 50)
+print("BEST MODEL")
+print("=" * 50)
+
+print("Model:", best_model["Model"])
+print(
+    "Accuracy:",
+    round(best_model["Test Accuracy (%)"], 2),
+    "%"
+)
+
+
+# ============================================================
+# 21. Display the final comparison
+# ============================================================
+
+print("\nFinal Results:")
+print(results.to_string(index=False))
