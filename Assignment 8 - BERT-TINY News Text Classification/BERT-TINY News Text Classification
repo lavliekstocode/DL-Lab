@@ -1,0 +1,557 @@
+# ============================================================
+# BERT-TINY NEWS TEXT CLASSIFICATION
+# Dataset: AG News
+#
+# Classes:
+# World, Sports, Business, Sci/Tech
+#
+# Lightweight version so it can run on systems
+# with limited RAM, GPU and disk space.
+# ============================================================
+
+# Install these once if they are not already installed:
+# !pip install -q transformers datasets scikit-learn torch accelerate matplotlib seaborn
+
+
+import numpy as np
+import torch
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from datasets import load_dataset
+
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification,
+    TrainingArguments,
+    Trainer,
+    DataCollatorWithPadding
+)
+
+from sklearn.metrics import (
+    accuracy_score,
+    precision_recall_fscore_support,
+    classification_report,
+    confusion_matrix
+)
+
+
+# ============================================================
+# 1. LOAD THE DATASET
+# ============================================================
+#
+# AG News is a simple news classification dataset.
+# Each article belongs to one of four categories.
+# ============================================================
+
+print("Loading AG News dataset...")
+
+dataset = load_dataset("ag_news")
+
+print(dataset)
+
+
+# ============================================================
+# 2. HAVE A QUICK LOOK AT THE DATA
+# ============================================================
+
+print("\nColumns:")
+print(dataset["train"].column_names)
+
+print("\nFirst example:")
+print(dataset["train"][0])
+
+
+# ============================================================
+# 3. SET THE CLASS NAMES
+# ============================================================
+#
+# The dataset already uses labels from 0 to 3.
+# We just give those numbers meaningful names.
+# ============================================================
+
+label_names = [
+    "World",
+    "Sports",
+    "Business",
+    "Sci/Tech"
+]
+
+num_labels = len(label_names)
+
+id2label = {
+    i: label
+    for i, label in enumerate(label_names)
+}
+
+label2id = {
+    label: i
+    for i, label in enumerate(label_names)
+}
+
+
+print("\nNews Categories:")
+
+for i, label in enumerate(label_names):
+    print(i, "->", label)
+
+
+# ============================================================
+# 4. TAKE A SMALLER SUBSET
+# ============================================================
+#
+# The complete AG News dataset is fairly large.
+# Using a smaller portion keeps this experiment fast
+# and prevents unnecessary memory usage.
+# ============================================================
+
+TRAIN_SIZE = 8000
+TEST_SIZE = 2000
+
+train_dataset = dataset["train"].shuffle(
+    seed=42
+).select(
+    range(TRAIN_SIZE)
+)
+
+test_dataset = dataset["test"].shuffle(
+    seed=42
+).select(
+    range(TEST_SIZE)
+)
+
+
+print("\nDataset sizes:")
+
+print("Training:", len(train_dataset))
+print("Testing :", len(test_dataset))
+
+
+# ============================================================
+# 5. MAKE A VALIDATION SET
+# ============================================================
+#
+# AG News gives us train and test data.
+# We keep 10% of the training data aside for validation.
+# ============================================================
+
+split_dataset = train_dataset.train_test_split(
+    test_size=0.10,
+    seed=42
+)
+
+train_dataset = split_dataset["train"]
+
+validation_dataset = split_dataset["test"]
+
+
+print("\nAfter validation split:")
+
+print("Training   :", len(train_dataset))
+print("Validation :", len(validation_dataset))
+print("Testing    :", len(test_dataset))
+
+
+# ============================================================
+# 6. LOAD BERT-TINY
+# ============================================================
+#
+# Normal BERT models are fairly large.
+# BERT-tiny is much smaller, so it is easier to run locally.
+# ============================================================
+
+MODEL_NAME = "prajjwal1/bert-tiny"
+
+print("\nLoading tokenizer...")
+
+tokenizer = AutoTokenizer.from_pretrained(
+    MODEL_NAME
+)
+
+
+# ============================================================
+# 7. TOKENIZE THE NEWS ARTICLES
+# ============================================================
+#
+# BERT cannot directly understand raw text.
+# The tokenizer converts the articles into token IDs.
+#
+# We limit the input to 128 tokens to keep the model light.
+# ============================================================
+
+def tokenize_function(examples):
+
+    return tokenizer(
+        examples["text"],
+        truncation=True,
+        max_length=128
+    )
+
+
+print("\nTokenizing training data...")
+
+tokenized_train = train_dataset.map(
+    tokenize_function,
+    batched=True,
+    remove_columns=["text"],
+    desc="Tokenizing training data"
+)
+
+
+print("Tokenizing validation data...")
+
+tokenized_validation = validation_dataset.map(
+    tokenize_function,
+    batched=True,
+    remove_columns=["text"],
+    desc="Tokenizing validation data"
+)
+
+
+print("Tokenizing test data...")
+
+tokenized_test = test_dataset.map(
+    tokenize_function,
+    batched=True,
+    remove_columns=["text"],
+    desc="Tokenizing test data"
+)
+
+
+# ============================================================
+# 8. PAD EACH BATCH ONLY AS MUCH AS NEEDED
+# ============================================================
+#
+# Instead of making every article exactly 128 tokens long,
+# padding is added dynamically for each batch.
+# This saves some memory during training.
+# ============================================================
+
+data_collator = DataCollatorWithPadding(
+    tokenizer=tokenizer
+)
+
+
+# ============================================================
+# 9. LOAD THE CLASSIFICATION MODEL
+# ============================================================
+#
+# We add a classification layer on top of BERT-tiny.
+# The final layer has 4 outputs, one for each news category.
+# ============================================================
+
+print("\nLoading BERT-tiny model...")
+
+model = AutoModelForSequenceClassification.from_pretrained(
+    MODEL_NAME,
+    num_labels=num_labels,
+    id2label=id2label,
+    label2id=label2id
+)
+
+
+# ============================================================
+# 10. DEFINE THE EVALUATION METRICS
+# ============================================================
+#
+# Accuracy tells us how many predictions were correct.
+# Precision, recall and F1 give us a better idea of
+# how well the model handles the four different classes.
+# ============================================================
+
+def compute_metrics(pred):
+
+    predictions = np.argmax(
+        pred.predictions,
+        axis=1
+    )
+
+    labels = pred.label_ids
+
+    precision, recall, f1, _ = (
+        precision_recall_fscore_support(
+            labels,
+            predictions,
+            average="weighted",
+            zero_division=0
+        )
+    )
+
+    accuracy = accuracy_score(
+        labels,
+        predictions
+    )
+
+    return {
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1
+    }
+
+
+# ============================================================
+# 11. TRAINING SETTINGS
+# ============================================================
+#
+# Five epochs are used as requested.
+# A small batch size keeps memory usage under control.
+# ============================================================
+
+training_args = TrainingArguments(
+
+    output_dir="./bert_tiny_agnews_results",
+
+    eval_strategy="epoch",
+
+    save_strategy="epoch",
+
+    learning_rate=2e-5,
+
+    per_device_train_batch_size=8,
+
+    per_device_eval_batch_size=8,
+
+    num_train_epochs=5,
+
+    weight_decay=0.01,
+
+    logging_steps=100,
+
+    load_best_model_at_end=True,
+
+    metric_for_best_model="f1",
+
+    greater_is_better=True,
+
+    save_total_limit=1,
+
+    report_to="none",
+
+    fp16=torch.cuda.is_available(),
+
+    dataloader_pin_memory=False
+)
+
+
+# ============================================================
+# 12. CREATE THE TRAINER
+# ============================================================
+
+trainer = Trainer(
+
+    model=model,
+
+    args=training_args,
+
+    train_dataset=tokenized_train,
+
+    eval_dataset=tokenized_validation,
+
+    tokenizer=tokenizer,
+
+    data_collator=data_collator,
+
+    compute_metrics=compute_metrics
+)
+
+
+# ============================================================
+# 13. TRAIN THE MODEL
+# ============================================================
+
+print("\n========================================")
+print("STARTING BERT-TINY TRAINING")
+print("========================================")
+
+trainer.train()
+
+
+# ============================================================
+# 14. CHECK PERFORMANCE ON THE TEST SET
+# ============================================================
+
+print("\nEvaluating model on test data...")
+
+results = trainer.evaluate(
+    tokenized_test
+)
+
+
+print("\n========================================")
+print("FINAL TEST RESULTS")
+print("========================================")
+
+print(
+    f"Accuracy  : {results['eval_accuracy']:.4f}"
+)
+
+print(
+    f"Precision : {results['eval_precision']:.4f}"
+)
+
+print(
+    f"Recall    : {results['eval_recall']:.4f}"
+)
+
+print(
+    f"F1 Score  : {results['eval_f1']:.4f}"
+)
+
+
+# ============================================================
+# 15. GET THE MODEL'S PREDICTIONS
+# ============================================================
+
+predictions = trainer.predict(
+    tokenized_test
+)
+
+y_pred = np.argmax(
+    predictions.predictions,
+    axis=1
+)
+
+y_true = predictions.label_ids
+
+
+# ============================================================
+# 16. DETAILED CLASSIFICATION REPORT
+# ============================================================
+
+print("\n========================================")
+print("CLASSIFICATION REPORT")
+print("========================================")
+
+print(
+    classification_report(
+        y_true,
+        y_pred,
+        target_names=label_names,
+        zero_division=0
+    )
+)
+
+
+# ============================================================
+# 17. CONFUSION MATRIX
+# ============================================================
+#
+# This lets us see which news categories the model
+# is confusing with each other.
+# ============================================================
+
+cm = confusion_matrix(
+    y_true,
+    y_pred
+)
+
+plt.figure(figsize=(8, 6))
+
+sns.heatmap(
+    cm,
+    annot=True,
+    fmt="d",
+    cmap="Blues",
+    xticklabels=label_names,
+    yticklabels=label_names
+)
+
+plt.xlabel("Predicted Category")
+plt.ylabel("Actual Category")
+
+plt.title(
+    "BERT-Tiny - AG News Classification"
+)
+
+plt.tight_layout()
+
+plt.show()
+
+
+# ============================================================
+# 18. FUNCTION FOR CLASSIFYING NEW NEWS
+# ============================================================
+#
+# After training, we can give the model a completely new
+# piece of news and ask it to predict the category.
+# ============================================================
+
+def predict_news_category(text):
+
+    inputs = tokenizer(
+        text,
+        return_tensors="pt",
+        truncation=True,
+        padding=True,
+        max_length=128
+    )
+
+    device = next(
+        model.parameters()
+    ).device
+
+    inputs = {
+        key: value.to(device)
+        for key, value in inputs.items()
+    }
+
+    model.eval()
+
+    with torch.no_grad():
+
+        outputs = model(**inputs)
+
+    probabilities = torch.softmax(
+        outputs.logits,
+        dim=1
+    )
+
+    predicted_id = torch.argmax(
+        probabilities,
+        dim=1
+    ).item()
+
+    confidence = (
+        probabilities[0][predicted_id].item()
+        * 100
+    )
+
+    predicted_category = id2label[
+        predicted_id
+    ]
+
+    return predicted_category, confidence
+
+
+# ============================================================
+# 19. TRY IT ON A NEW NEWS ARTICLE
+# ============================================================
+
+sample_text = """
+Apple announced a new generation of artificial intelligence
+chips designed to improve the performance of its latest
+computing devices and machine learning applications.
+"""
+
+
+prediction, confidence = predict_news_category(
+    sample_text
+)
+
+
+print("\n========================================")
+print("NEWS TEXT CLASSIFIER")
+print("========================================")
+
+print("\nInput:")
+print(sample_text)
+
+print("\nPredicted Category:")
+print(prediction)
+
+print(
+    f"\nConfidence: {confidence:.2f}%"
+)
+
+print("========================================")
