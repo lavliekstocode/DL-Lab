@@ -311,35 +311,21 @@ Comparing them on the same dataset allows their classification performance to be
 
 ---
 
-## 📌 Expected Output
+## 📊 Results
 
-The program produces results similar to:
+The three models were trained and evaluated on the same test dataset using a maximum of 10 epochs.
 
-    ============================================================
-    FINAL COMPARISON
-    ============================================================
+| Model | Accuracy | Precision | Recall | F1 Score |
+|---|---:|---:|---:|---:|
+| **RNN** | **69.97%** | **71.39%** | **69.97%** | **69.86%** |
+| LSTM | 50.08% | 45.95% | 50.08% | 45.91% |
+| GRU | 53.92% | 55.02% | 53.92% | 48.78% |
 
-    RNN
-    Accuracy : XX.XXXX
-    Precision: XX.XXXX
-    Recall   : XX.XXXX
-    F1 Score : XX.XXXX
+The Simple RNN achieved the highest overall performance in this experiment, with an accuracy of **69.97%** and an F1 Score of **69.86%**.
 
-    LSTM
-    Accuracy : XX.XXXX
-    Precision: XX.XXXX
-    Recall   : XX.XXXX
-    F1 Score : XX.XXXX
+The GRU achieved an accuracy of **53.92%**, while the LSTM achieved **50.08%**.
 
-    GRU
-    Accuracy : XX.XXXX
-    Precision: XX.XXXX
-    Recall   : XX.XXXX
-    F1 Score : XX.XXXX
-
-The exact values can vary slightly depending on the TensorFlow version, hardware, initialization, and training process.
-
----
+These results are specific to the selected architecture, hyperparameters, dataset preprocessing, and 10-epoch training limit. Therefore, the results should not be interpreted as indicating that Simple RNN is generally superior to LSTM or GRU. With additional training, hyperparameter tuning, and architecture optimization, the performance of the models may change.
 
 ## 🌍 Real-World Applications
 
