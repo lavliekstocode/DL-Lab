@@ -301,7 +301,7 @@ The model checkpoint, scaler, and label encoder can be reused for future predict
 
 ## Author
 
-**Lavanya**
+**Lavanya Vinodkumar**
 
 
 
