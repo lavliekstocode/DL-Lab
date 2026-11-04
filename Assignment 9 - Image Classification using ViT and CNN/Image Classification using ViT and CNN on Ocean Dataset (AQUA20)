@@ -1,0 +1,246 @@
+# ============================================================
+# OCEAN IMAGE CLASSIFICATION: ViT vs ResNet50 CNN
+# Dataset: AQUA20
+# Goal: Compare a Vision Transformer with a CNN using transfer learning
+# ============================================================
+# Install these first if you haven't already:
+# %pip install -q torch torchvision datasets scikit-learn matplotlib pandas
+import time
+import torch
+import pandas as pd
+import matplotlib.pyplot as plt
+from torch import nn
+from torch.utils.data import Dataset, DataLoader
+from torchvision import models, transforms
+from datasets import load_dataset
+from sklearn.metrics import accuracy_score, f1_score
+# Use the GPU if one is available; otherwise, run on the CPU.
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Running on:", device)
+# ============================================================
+# 1. Load the ocean-life dataset
+# ============================================================
+print("\nLoading AQUA20 dataset...")
+dataset = load_dataset("Mrscarce/AQUA20")
+# Each label represents one of the marine-life categories.
+class_names = dataset["train"].features["label"].names
+num_classes = len(class_names)
+print("Number of classes:", num_classes)
+print("Categories:", class_names)
+# ============================================================
+# 2. Select a small sample to keep the experiment manageable
+# ============================================================
+# Start small to check that the code runs correctly.
+# Once it works, increase these numbers for a stronger experiment.
+TRAIN_SIZE = min(200, len(dataset["train"]))
+TEST_SIZE = min(100, len(dataset["test"]))
+train_data = dataset["train"].shuffle(seed=42).select(
+ range(TRAIN_SIZE)
+)
+test_data = dataset["test"].shuffle(seed=42).select(
+ range(TEST_SIZE)
+)
+print("Training images:", len(train_data))
+print("Testing images:", len(test_data))
+# ============================================================
+# 3. Prepare the images
+# ============================================================
+# Both models expect images of a consistent size.
+# ImageNet normalization matches the preprocessing used by
+# the pretrained ResNet50 and torchvision ViT weights.
+transform = transforms.Compose([
+ transforms.Resize((224, 224)),
+ transforms.ToTensor(),
+ transforms.Normalize(
+ mean=[0.485, 0.456, 0.406],
+ std=[0.229, 0.224, 0.225]
+ )
+])
+class OceanDataset(Dataset):
+ def __init__(self, data):
+ self.data = data
+ def __len__(self):
+ return len(self.data)
+ def __getitem__(self, index):
+ row = self.data[index]
+ # Some dataset images may be grayscale or RGBA,
+ # so convert each image to standard RGB.
+ image = row["image"].convert("RGB")
+ image = transform(image)
+ label = int(row["label"])
+ return image, label
+train_ds = OceanDataset(train_data)
+test_ds = OceanDataset(test_data)
+# Small batches reduce memory usage, especially on a CPU.
+train_loader = DataLoader(
+ train_ds,
+ batch_size=8,
+ shuffle=True,
+ num_workers=0
+)
+test_loader = DataLoader(
+ test_ds,
+ batch_size=8,
+ shuffle=False,
+ num_workers=0
+)
+# Check one batch before starting model training.
+images, labels = next(iter(train_loader))
+print("\nImage batch shape:", images.shape)
+print("Data loading successful!")
+# ============================================================
+# 4. Load the pretrained models
+# ============================================================
+print("\nLoading pretrained models...")
+# Model 1: Vision Transformer.
+# ViT divides an image into patches and learns relationships
+# between those patches using self-attention.
+vit_weights = models.ViT_B_16_Weights.DEFAULT
+vit = models.vit_b_16(weights=vit_weights)
+# Replace the original ImageNet classification head with
+# a new head for our marine-life categories.
+vit.heads.head = nn.Linear(
+ vit.heads.head.in_features,
+ num_classes
+)
+# Model 2: ResNet50 CNN.
+# ResNet50 learns visual patterns through convolutional layers
+# and uses residual connections to train deep networks.
+cnn_weights = models.ResNet50_Weights.DEFAULT
+cnn = models.resnet50(weights=cnn_weights)
+cnn.fc = nn.Linear(
+ cnn.fc.in_features,
+ num_classes
+)
+# Freeze the pretrained feature extractors.
+# For this quick experiment, we only train the final classifier.
+for model in [vit, cnn]:
+ for parameter in model.parameters():
+ parameter.requires_grad = False
+for parameter in vit.heads.head.parameters():
+ parameter.requires_grad = True
+for parameter in cnn.fc.parameters():
+ parameter.requires_grad = True
+vit = vit.to(device)
+cnn = cnn.to(device)
+print("Both models are ready!")
+# ============================================================
+# 5. Train and evaluate a model
+# ============================================================
+def train_and_evaluate(model, model_name):
+ print("\n" + "=" * 50)
+ print("Training:", model_name)
+ print("=" * 50)
+ # Only update the weights of the new classification head.
+ optimizer = torch.optim.Adam(
+ filter(
+ lambda p: p.requires_grad,
+ model.parameters()
+ ),
+ lr=0.001
+ )
+ loss_function = nn.CrossEntropyLoss()
+ # Two epochs are enough for a quick pipeline test.
+ # Increase this for a more meaningful experiment.
+ EPOCHS = 2
+ start_time = time.time()
+ for epoch in range(EPOCHS):
+ model.train()
+ total_loss = 0.0
+ for images, labels in train_loader:
+ images = images.to(device)
+ labels = labels.to(device)
+ # Clear gradients from the previous batch.
+ optimizer.zero_grad()
+ # Let the model predict the marine-life categories.
+ outputs = model(images)
+ # Measure how far the predictions are from the labels.
+ loss = loss_function(outputs, labels)
+ # Update the trainable classification layer.
+ loss.backward()
+ optimizer.step()
+ total_loss += loss.item()
+ average_loss = total_loss / len(train_loader)
+ print(
+ f"Epoch {epoch + 1}/{EPOCHS} - "
+ f"Training Loss: {average_loss:.4f}"
+ )
+ training_time = time.time() - start_time
+ # Now check how well the trained model handles unseen images.
+ model.eval()
+ actual_labels = []
+ predicted_labels = []
+ with torch.no_grad():
+ for images, labels in test_loader:
+ images = images.to(device)
+ outputs = model(images)
+ predictions = outputs.argmax(dim=1).cpu().tolist()
+ predicted_labels.extend(predictions)
+ actual_labels.extend(labels.tolist())
+ accuracy = accuracy_score(
+ actual_labels,
+ predicted_labels
+ )
+ f1 = f1_score(
+ actual_labels,
+ predicted_labels,
+ average="macro",
+ zero_division=0
+ )
+ print(f"\n{model_name} Test Accuracy: {accuracy * 100:.2f}%")
+ print(f"{model_name} Macro F1-score: {f1:.4f}")
+ print(f"{model_name} Training Time: {training_time:.2f} seconds")
+ return {
+ "Model": model_name,
+ "Accuracy (%)": accuracy * 100,
+ "Macro F1-score": f1,
+ "Training Time (seconds)": training_time
+ }
+# ============================================================
+# 6. Run the experiment for both architectures
+# ============================================================
+results = []
+# First, train and evaluate the Vision Transformer.
+results.append(
+ train_and_evaluate(vit, "Vision Transformer (ViT)")
+)
+# Next, train and evaluate the ResNet50 CNN.
+results.append(
+ train_and_evaluate(cnn, "ResNet50 CNN")
+)
+# ============================================================
+# 7. Compare the results
+# ============================================================
+results_df = pd.DataFrame(results)
+print("\n" + "=" * 55)
+print("FINAL MODEL COMPARISON")
+print("=" * 55)
+print(results_df.round(3).to_string(index=False))
+# ============================================================
+# 8. Plot the test accuracy of both models
+# ============================================================
+plt.figure(figsize=(8, 5))
+plt.bar(
+ results_df["Model"],
+ results_df["Accuracy (%)"]
+)
+plt.xlabel("Model")
+plt.ylabel("Test Accuracy (%)")
+plt.title("ViT vs ResNet50 on Ocean-Life Images")
+plt.ylim(0, 100)
+plt.grid(axis="y", alpha=0.3)
+plt.tight_layout()
+plt.show()
+# ============================================================
+# 9. Find the model with the highest test accuracy
+# ============================================================
+best_model = results_df.loc[
+ results_df["Accuracy (%)"].idxmax()
+]
+print("\nBEST MODEL")
+print("Model:", best_model["Model"])
+print(
+ "Test Accuracy:",
+ round(best_model["Accuracy (%)"], 2),
+ "%"
+) 
